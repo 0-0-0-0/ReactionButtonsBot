@@ -10,13 +10,21 @@ namespace ReactionButtonsBot
         
         static void Main(string[] args)
         {
-            //while (!Database.DatabaseTest.Test()) Console.WriteLine("...");
-            //Console.WriteLine("Database connection OK");
-
             bot.StartReceiving();
             Console.WriteLine("Started receiving");
-            Console.ReadKey();
+
+            while(Hotkey(Console.ReadKey(true)));
+
             bot.StopReceiving();
+        }
+
+        static bool Hotkey(ConsoleKeyInfo hotkey)
+        {
+            switch (hotkey.KeyChar)
+            {
+                default: return false;
+            }
+            return true;
         }
         
     }

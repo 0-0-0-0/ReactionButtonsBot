@@ -8,24 +8,24 @@ using Telegram.Bot.Args;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using MySql.Data.MySqlClient;
 
 namespace ReactionButtonsBot
 {
     class ReactionButtonsBot : TelegramBotClient
     {
         private static readonly InlineKeyboardMarkup defaultReactionsKeyboard;
-        private readonly User botUser;
+        private Database.DatabaseManager databaseManager;
 
         static ReactionButtonsBot()
         {
             string[] defaultReactions = { "like", "ok", "dislike" };
-
             defaultReactionsKeyboard = InlineKeyboardFactory.ReactionsKeyboard(defaultReactions);
         }
 
         public ReactionButtonsBot(string token) : base(token)
         {
-            botUser = GetMeAsync().Result;
+            databaseManager = new Database.DatabaseManager();
 
             OnMessage += ProcessMessage;
             OnCallbackQuery += ProcessCallbackQuery;
@@ -71,25 +71,34 @@ namespace ReactionButtonsBot
         async void ProcessCallbackQuery(object sender, CallbackQueryEventArgs e)
         {
             Console.WriteLine("Pressed button " + e.CallbackQuery.Data);
-            //Console.WriteLine($"User {e.CallbackQuery.From}, chat {e.CallbackQuery.ChatInstance}, message {e.CallbackQuery.Message.MessageId}");
 
-            int buttonNumber = Int32.Parse(e.CallbackQuery.Data);
+            byte buttonNumber = Byte.Parse(e.CallbackQuery.Data);
             Message message = e.CallbackQuery.Message;
-            SaveReaction(message, buttonNumber);
 
+            try
+            {
+                //SaveReaction(message, buttonNumber);
+                //UpdateReactionsCount(...);
+            }
+            catch(MySqlException ex)
+            {
+                await AnswerCallbackQueryAsync(e.CallbackQuery.Id, "Sorry, there appears to be some bug. Try again.", true);
+                Console.WriteLine(ex.Message);
+            }
 
-            await AnswerCallbackQueryAsync(e.CallbackQuery.Id);
+            try
+            {
+                //doesn't really matter if this fails
+                await AnswerCallbackQueryAsync(e.CallbackQuery.Id);
+            }
+            catch(Telegram.Bot.Exceptions.InvalidQueryIdException) { }
         }
-
-        async void SaveReaction(Message message, int buttonNumber)
-        {
-
-        }
-
-        private PhotoSize LargestPhotoSize(PhotoSize[] photoSizes)
+        
+        PhotoSize LargestPhotoSize(PhotoSize[] photoSizes)
         {
             //TODO actually select the largest file (and closest to original)
             return photoSizes[0];
         }
+
     }
 }

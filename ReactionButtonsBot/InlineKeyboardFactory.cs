@@ -12,7 +12,7 @@ namespace ReactionButtonsBot
         public static InlineKeyboardMarkup ReactionsKeyboard(IEnumerable<string> reactions)
         {
             var markup = new List<InlineKeyboardButton>();
-            Int32 i = 1;
+            Int32 i = 0;
             foreach(string reaction in reactions)
             {
                 var button = new InlineKeyboardButton();
@@ -25,19 +25,33 @@ namespace ReactionButtonsBot
             
             return new InlineKeyboardMarkup(markup);
         }
-
-        /// <summary>
-        /// Updates the keyboard markup according to a user's reaction
-        /// </summary>
-        /// <param name="reactions"></param>
-        /// <param name="buttonNumber"></param>
-        /// <param name="oldReaction"></param>
-        /// <returns></returns>
-        public static InlineKeyboardMarkup Reaction(IEnumerable<string> reactions, int? buttonNumber, int? oldReaction)
+        
+        public static InlineKeyboardMarkup SetReactionsCount(InlineKeyboardMarkup markup, IEnumerable<int> reactionsCount)
         {
-            
+            int i = 0;
+            foreach(var row in markup.InlineKeyboard)
+            {
+                foreach (InlineKeyboardButton button in row)
+                {
+                    if(i < reactionsCount.Count()) { button.SetButtonCount(reactionsCount.ElementAt(i)); }
+                }
+            }
 
-            return ReactionsKeyboard(reactions);
+            return markup;
+        }
+
+        private static void SetButtonCount(this InlineKeyboardButton button, int count)
+        {
+            var lastWordIndex = button.Text.Trim().LastIndexOf(' ') + 1;
+            if(lastWordIndex == -1 || !Int32.TryParse(button.Text.Substring(lastWordIndex), out int oldCount))
+            {
+                button.Text += ' ';
+            }
+            else
+            {
+                button.Text = button.Text.Substring(0, lastWordIndex);
+            }
+            button.Text += count;
         }
     }
 }
