@@ -25,83 +25,184 @@ namespace ReactionButtonsBot.Database
             if (connection != null) { connection.Dispose(); }
         }
         
-
-        //DRAFT
-        public void SaveButtons(IEnumerable<InlineKeyboardButton> buttons, int keyboard)
+        private void SaveButton(InlineKeyboardButton button, int keyboard, MySqlTransaction transaction)
         {
             using (var command = connection.CreateCommand())
             {
+                command.Transaction = transaction;
                 command.CommandText = "insert into buttons (keyboard, number, text) " +
                     "values (@keyboard, @number, @text)";
-                foreach(var button in buttons)
-                {
-                    command.Parameters.AddWithValue("keyboard", keyboard);
-                    command.Parameters.AddWithValue("number", button.CallbackData);
-                    command.Parameters.AddWithValue("text", button.Text);
-                    command.ExecuteNonQuery();
-                }
-            }
-        }
-
-        //DRAFT
-        public int SaveKeyboard(InlineKeyboardMarkup markup)
-        {
-            int id;
-            using (var insertCommand = connection.CreateCommand())
-            {
-                insertCommand.CommandText = "insert into keyboards (id) values (null)";
-                insertCommand.ExecuteNonQuery();
-                id = (int)insertCommand.LastInsertedId;
-            }
-            return id;
-        }
-
-        //DRAFT
-        public void SaveMessage(Message apiMessage)
-        {
-            var dbMessage = new {
-                chat_id = apiMessage.Chat.Id,
-                message_id = apiMessage.MessageId
-            };
-        }
-
-        //DRAFT (refactored the db, change this accordingly)
-        void SaveReaction(Message message, int buttonNumber)
-        {
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "insert into reactions (chat_id, message_id, user_id, button_number) " +
-                    "values (@chat_id, @message_id, @user_id, @button_number) " +
-                    "on duplicate key update button_number=@button_number";
-                command.Parameters.AddWithValue("chat_id", message.Chat.Id);
-                command.Parameters.AddWithValue("message_id", message.MessageId);
-                command.Parameters.AddWithValue("user_id", message.From.Id);
-                command.Parameters.AddWithValue("button_number", buttonNumber);
+                
+                command.Parameters.AddWithValue("keyboard", keyboard);
+                command.Parameters.AddWithValue("number", button.CallbackData);
+                command.Parameters.AddWithValue("text", button.Text);
                 command.ExecuteNonQuery();
             }
         }
 
-        //DRAFT
-        void UpdateReactionsCount(Message message)
+        public int SaveKeyboard(InlineKeyboardMarkup markup)
         {
-            using (var command = connection.CreateCommand())
+            int id;
+            MySqlTransaction transaction = connection.BeginTransaction();
+            try
             {
-                command.CommandText = "select button_number, count(id) from buttons " +
-                    "where chat_id=@chat_id and message_id=@message_id " +
-                    "group by user_id order by button_number asc";
-                command.Parameters.AddWithValue("chat_id", message.Chat.Id);
-                command.Parameters.AddWithValue("message_id", message.MessageId);
-                var reader = command.ExecuteReader();
-
-                List<int> reactionsCount = new List<int>();
-                while (reader.Read())
+                using (var command = connection.CreateCommand())
                 {
-                    Console.WriteLine((int)reader[1] + " : " + (int)reader[1]);
-                    reactionsCount.Add((int)reader[1]);
+                    command.Transaction = transaction;
+                    command.CommandText = "insert into keyboards (id) values (null)";
+                    command.ExecuteNonQuery();
+                    id = (int)command.LastInsertedId;
                 }
 
+                foreach (var row in markup.InlineKeyboard)
+                {
+                    foreach (var button in row)
+                    {
+                        SaveButton(button, id, transaction);
+                    }
+                }
+
+                transaction.Commit();
+                return id;
+            }
+            catch(Exception)
+            {
+                transaction.Rollback();
+                throw new Exception("Transaction failed, succesfully rolled back.");
             }
         }
 
+        public void SaveChat(Chat chat, int? keyboard)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                if(keyboard!=null)
+                {
+                    command.CommandText = "insert into chats values(@chat_id, @keyboard) " +
+                        "on duplicate key update keyboard=@keyboard";
+                    command.Parameters.AddWithValue("keyboard", keyboard);
+                }
+                else
+                {
+                    command.CommandText = "insert into chats values(@chat_id)";
+                }
+                command.Parameters.AddWithValue("chat_id", chat.Id);
+                command.ExecuteNonQuery();
+            }
+        }
+
+        public int SaveMessage(Message apiMessage, int? keyboard)
+        {
+            int id;
+            var dbMessage = new {
+                chat_id = apiMessage.Chat.Id,
+                message_id = apiMessage.MessageId,
+                keyboard
+            };
+            using (var command = connection.CreateCommand())
+            {
+                if (keyboard != null)
+                {
+                    command.CommandText = "insert into messages (chat_id, message_id, keyboard) " +
+                    "values (@chat_id, @message_id, @keyboard) " +
+                    "on duplicate key update keyboard=@keyboard";
+                    command.Parameters.AddWithValue("keyboard", dbMessage.keyboard);
+                }
+                else
+                {
+                    command.CommandText = "insert into messages (chat_id, message_id, keyboard) " +
+                    "values (@chat_id, @message_id)";
+                }
+                command.Parameters.AddWithValue("chat_id", dbMessage.chat_id);
+                command.Parameters.AddWithValue("message_id", dbMessage.message_id);
+                command.ExecuteNonQuery();
+                id = (int)command.LastInsertedId;
+            }
+            return id;
+        }
+
+        public List<string> GetKeyboardButtons(int keyboard)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "select text from buttons " +
+                    "where keyboard=@keyboard " +
+                    "order by number asc";
+                command.Parameters.AddWithValue("keyboard", keyboard);
+                var reader = command.ExecuteReader();
+
+                var reactions = new List<string>();
+                while (reader.Read())
+                {
+                    Console.WriteLine((string)reader[0]);
+                    reactions.Add((string)reader[0]);
+                }
+
+                return reactions;
+            }
+        }
+
+        public int? GetKeyboardId(Chat chat)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "select keyboard from chats where chat_id=@chat_id";
+                command.Parameters.AddWithValue("chat_id", chat.Id);
+                return (int?)command.ExecuteScalar();
+            }
+        }
+
+        public int? GetKeyboardId(Message message)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "select keyboard from messages where chat_id=@chat_id and message_id=@message_id";
+                command.Parameters.AddWithValue("chat_id", message.Chat.Id);
+                command.Parameters.AddWithValue("message_id", message.MessageId);
+                return (int?)command.ExecuteScalar();
+            }
+        }
+        
+        public int? GetMessageId(long chat_id, int message_id)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "select id from messages where chat_id=@chat_id and message_id=@message_id";
+                command.Parameters.AddWithValue("chat_id", chat_id);
+                command.Parameters.AddWithValue("message_id", message_id);
+                return (int?)command.ExecuteScalar();
+            }
+        }
+
+        public int? GetMessageId(Message message)
+        {
+            return GetMessageId(message.Chat.Id, message.MessageId);
+        }
+
+        public int? GetButtonId(int keyboard, byte number)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "select id from buttons where keyboard=@keyboard and number=@number";
+                command.Parameters.AddWithValue("keyboard", keyboard);
+                command.Parameters.AddWithValue("number", number);
+                return (int?)command.ExecuteScalar();
+            }
+        }
+
+        public void SaveReaction(int user_id, int message, int button)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "insert into reactions (user_id, message, button)" +
+                    "values (@user_id, @message, @button) " +
+                    "on duplicate key update button=@button";
+                command.Parameters.AddWithValue("user_id", user_id);
+                command.Parameters.AddWithValue("message", message);
+                command.Parameters.AddWithValue("button", button);
+                command.ExecuteNonQuery();
+            }
+        }
+        
     }
 }

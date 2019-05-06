@@ -9,12 +9,20 @@ namespace ReactionButtonsBot
 {
     static class InlineKeyboardFactory
     {
+        public static InlineKeyboardMarkup ReactionsKeyboard(string reactionsString, char separator=' ')
+        {
+            var reactions = reactionsString.Split(separator);
+
+            return ReactionsKeyboard(reactions);
+        }
+
         public static InlineKeyboardMarkup ReactionsKeyboard(IEnumerable<string> reactions)
         {
             var markup = new List<InlineKeyboardButton>();
             Int32 i = 0;
-            foreach(string reaction in reactions)
+            foreach (string reaction in reactions)
             {
+                if (reaction.Length == 0) { continue; }
                 var button = new InlineKeyboardButton();
                 button.Text = reaction;
                 button.CallbackData = i.ToString();
@@ -22,7 +30,7 @@ namespace ReactionButtonsBot
 
                 ++i;
             }
-            
+            if (i == 0) { throw new Exception("Empty inline keyboard!"); }
             return new InlineKeyboardMarkup(markup);
         }
         
