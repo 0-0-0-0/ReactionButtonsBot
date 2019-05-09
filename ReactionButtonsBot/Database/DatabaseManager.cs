@@ -61,16 +61,45 @@ namespace ReactionButtonsBot.Database
                         SaveButton(button, id, transaction);
                     }
                 }
-
+                
                 transaction.Commit();
                 return id;
-            }
+                }
             catch(Exception)
             {
                 transaction.Rollback();
                 throw new Exception("Transaction failed, succesfully rolled back.");
             }
         }
+
+        //
+
+        #region [DRAFT] globally default keyboards
+
+        /* a more complex variant to change them over time */
+        //private void SetGlobalDefaultKeyboard(int keyboard, MySqlTransaction transaction)
+        //{
+        //    throw new NotImplementedException();
+        //    using (var command = connection.CreateCommand())
+        //    {
+        //        command.Transaction = transaction;
+        //        command.CommandText = "insert into global_default_keyboards (keyboard) values (@keyboard)";
+        //        command.Parameters.AddWithValue("keyboard", keyboard);
+        //        command.ExecuteNonQuery();
+        //    }
+        //}
+
+        //public object GetGlobalDefaultKeyboard()
+        //{
+        //    throw new NotImplementedException();
+        //    using (var command = connection.CreateCommand())
+        //    {
+        //        command.CommandText = "select keyboard from global_default_keyboards order by id limit 1";
+        //        return command.ExecuteScalar();
+        //    }
+        //}
+
+        #endregion
 
         public void SaveChat(Chat chat, int? keyboard)
         {
@@ -91,34 +120,34 @@ namespace ReactionButtonsBot.Database
             }
         }
 
-        public int SaveMessage(Message apiMessage, int? keyboard)
+        /// <summary>
+        /// Saves a message with a new inline keyboard
+        /// </summary>
+        /// <param name="apiMessage"></param>
+        /// <param name="markup"></param>
+        public void SaveMessage(Message message, InlineKeyboardMarkup markup)
         {
-            int id;
-            var dbMessage = new {
-                chat_id = apiMessage.Chat.Id,
-                message_id = apiMessage.MessageId,
-                keyboard
-            };
+            SaveMessage(message, SaveKeyboard(markup));
+        }
+
+        /// <summary>
+        /// Saves a message with an existing inline keyboard
+        /// </summary>
+        /// <param name="apiMessage"></param>
+        /// <param name="keyboard"></param>
+        public void SaveMessage(Message message, int keyboard)
+        {
             using (var command = connection.CreateCommand())
             {
-                if (keyboard != null)
-                {
-                    command.CommandText = "insert into messages (chat_id, message_id, keyboard) " +
-                    "values (@chat_id, @message_id, @keyboard) " +
-                    "on duplicate key update keyboard=@keyboard";
-                    command.Parameters.AddWithValue("keyboard", dbMessage.keyboard);
-                }
-                else
-                {
-                    command.CommandText = "insert into messages (chat_id, message_id, keyboard) " +
-                    "values (@chat_id, @message_id)";
-                }
-                command.Parameters.AddWithValue("chat_id", dbMessage.chat_id);
-                command.Parameters.AddWithValue("message_id", dbMessage.message_id);
+                command.CommandText = "insert into messages (chat_id, message_id, keyboard) " +
+                "values (@chat_id, @message_id, @keyboard) " +
+                "on duplicate key update keyboard=@keyboard";
+                command.Parameters.AddWithValue("keyboard", keyboard);
+                
+                command.Parameters.AddWithValue("chat_id", message.Chat.Id);
+                command.Parameters.AddWithValue("message_id", message.MessageId);
                 command.ExecuteNonQuery();
-                id = (int)command.LastInsertedId;
             }
-            return id;
         }
 
         public List<string> GetKeyboardButtons(int keyboard)
@@ -132,75 +161,93 @@ namespace ReactionButtonsBot.Database
                 var reader = command.ExecuteReader();
 
                 var reactions = new List<string>();
-                while (reader.Read())
+                if(reader.HasRows)
                 {
-                    Console.WriteLine((string)reader[0]);
-                    reactions.Add((string)reader[0]);
+                    while (reader.Read())
+                    {
+                        reactions.Add((string)reader[0]);
+                    }
                 }
+                reader.Close();
 
                 return reactions;
             }
         }
 
-        public int? GetKeyboardId(Chat chat)
+        public Dictionary<byte, int> GetReactionsCount(Message message)
+        {
+            var result = new Dictionary<byte,int>();
+            byte number;
+            int count;
+            using(var command = connection.CreateCommand())
+            {
+                command.CommandText = "select number, count(*) from reactions " +
+                    "where chat_id=@chat_id and message_id=@message_id " +
+                    "group by number";
+                command.Parameters.AddWithValue("message_id", message.MessageId);
+                command.Parameters.AddWithValue("chat_id", message.Chat.Id);
+                var reader = command.ExecuteReader();
+                if (reader.HasRows)
+                {
+                    while (reader.Read())
+                    {
+                        number = reader.GetByte(0);
+                        count = reader.GetInt32(1);
+                        result[number] = count;
+                    }
+                }
+                reader.Close();
+            }
+            return result;
+        }
+
+        public object GetKeyboard(Chat chat)
         {
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = "select keyboard from chats where chat_id=@chat_id";
                 command.Parameters.AddWithValue("chat_id", chat.Id);
-                return (int?)command.ExecuteScalar();
+                return command.ExecuteScalar();
             }
         }
 
-        public int? GetKeyboardId(Message message)
+        public int GetKeyboard(Message message)
         {
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = "select keyboard from messages where chat_id=@chat_id and message_id=@message_id";
                 command.Parameters.AddWithValue("chat_id", message.Chat.Id);
                 command.Parameters.AddWithValue("message_id", message.MessageId);
-                return (int?)command.ExecuteScalar();
+                return (int)command.ExecuteScalar();
             }
         }
         
-        public int? GetMessageId(long chat_id, int message_id)
+        public void SaveReaction(int user_id, long chat_id, int message_id, byte number)
         {
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "select id from messages where chat_id=@chat_id and message_id=@message_id";
+                command.CommandText = "select count(*) from reactions " +
+                    "where chat_id=@chat_id and message_id=@message_id and user_id=@user_id and number=@number";
                 command.Parameters.AddWithValue("chat_id", chat_id);
                 command.Parameters.AddWithValue("message_id", message_id);
-                return (int?)command.ExecuteScalar();
-            }
-        }
-
-        public int? GetMessageId(Message message)
-        {
-            return GetMessageId(message.Chat.Id, message.MessageId);
-        }
-
-        public int? GetButtonId(int keyboard, byte number)
-        {
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "select id from buttons where keyboard=@keyboard and number=@number";
-                command.Parameters.AddWithValue("keyboard", keyboard);
-                command.Parameters.AddWithValue("number", number);
-                return (int?)command.ExecuteScalar();
-            }
-        }
-
-        public void SaveReaction(int user_id, int message, int button)
-        {
-            using (var command = connection.CreateCommand())
-            {
-                command.CommandText = "insert into reactions (user_id, message, button)" +
-                    "values (@user_id, @message, @button) " +
-                    "on duplicate key update button=@button";
                 command.Parameters.AddWithValue("user_id", user_id);
-                command.Parameters.AddWithValue("message", message);
-                command.Parameters.AddWithValue("button", button);
-                command.ExecuteNonQuery();
+                command.Parameters.AddWithValue("number", number);
+                int count = Convert.ToInt32(command.ExecuteScalar());
+                if(count != 0)
+                {
+                    command.CommandText = "delete from reactions " +
+                        "where chat_id=@chat_id and message_id=@message_id and user_id=@user_id";
+                    command.ExecuteNonQuery();
+                    Console.WriteLine("deleted");
+                }
+                else
+                {
+                    command.CommandText = "insert into reactions (chat_id, message_id, user_id, number)" +
+                    "values (@chat_id, @message_id, @user_id, @number) " +
+                    "on duplicate key update number=@number";
+                    command.ExecuteNonQuery();
+                    Console.WriteLine("upserted");
+                }
             }
         }
         

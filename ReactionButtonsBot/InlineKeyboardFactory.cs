@@ -34,14 +34,16 @@ namespace ReactionButtonsBot
             return new InlineKeyboardMarkup(markup);
         }
         
-        public static InlineKeyboardMarkup SetReactionsCount(InlineKeyboardMarkup markup, IEnumerable<int> reactionsCount)
+        public static InlineKeyboardMarkup SetReactionsCount(InlineKeyboardMarkup markup, Dictionary<byte,int> reactionsCount)
         {
-            int i = 0;
+            byte i = 0;
+            
             foreach(var row in markup.InlineKeyboard)
             {
                 foreach (InlineKeyboardButton button in row)
                 {
-                    if(i < reactionsCount.Count()) { button.SetButtonCount(reactionsCount.ElementAt(i)); }
+                    button.SetButtonCount(reactionsCount.ContainsKey(i) ? reactionsCount[i] : 0);
+                    ++i;
                 }
             }
 
@@ -50,16 +52,16 @@ namespace ReactionButtonsBot
 
         private static void SetButtonCount(this InlineKeyboardButton button, int count)
         {
-            var lastWordIndex = button.Text.Trim().LastIndexOf(' ') + 1;
-            if(lastWordIndex == -1 || !Int32.TryParse(button.Text.Substring(lastWordIndex), out int oldCount))
+            var lastWhiteSpace = button.Text.Trim().LastIndexOf(' ');
+            if(lastWhiteSpace != -1 && Int32.TryParse(button.Text.Substring(lastWhiteSpace + 1), out int oldCount))
+            {
+                button.Text = button.Text.Substring(0, lastWhiteSpace);
+            }
+            if(count > 0)
             {
                 button.Text += ' ';
+                button.Text += count;
             }
-            else
-            {
-                button.Text = button.Text.Substring(0, lastWordIndex);
-            }
-            button.Text += count;
         }
     }
 }

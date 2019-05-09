@@ -22,9 +22,6 @@ namespace ReactionButtonsBot
         {
             switch (hotkey.KeyChar)
             {
-                case 'm':
-                    bot.Test("GetMessageId");
-                    break;
                 default: return false;
             }
             return true;

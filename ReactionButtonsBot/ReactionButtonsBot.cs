@@ -31,30 +31,12 @@ namespace ReactionButtonsBot
             botMention = '@' + botUser.Username;
 
             dbManager = new Database.DatabaseManager();
-
+            
             OnMessage += ProcessMessage;
             OnCallbackQuery += ProcessCallbackQuery;
         }
 
-        async void ProcessMessage(object sender, MessageEventArgs e)
-        {
-            Console.WriteLine(e.Message.MessageId + "@" + e.Message.Chat.Id + " : " + e.Message.Type);
-            switch (e.Message.Type)
-            {
-                case MessageType.Text:
-                    if(isMentioned(e.Message))
-                    {
-                        ProcessCommands(e.Message);
-                    }
-                    break;
-                    
-                case MessageType.Photo:
-                case MessageType.Document:
-                    AddReactionsToMessage(e.Message);
-                    break;
-                
-            }
-        }
+        #region handling bot commands
 
         private bool isMentioned(Message message)
         {
@@ -109,6 +91,58 @@ namespace ReactionButtonsBot
             }
         }
 
+        #endregion
+
+        async void ProcessMessage(object sender, MessageEventArgs e)
+        {
+            Console.WriteLine(e.Message.MessageId + "@" + e.Message.Chat.Id + " : " + e.Message.Type);
+            switch (e.Message.Type)
+            {
+                case MessageType.Text:
+                    if(isMentioned(e.Message))
+                    {
+                        ProcessCommands(e.Message);
+                    }
+                    break;
+                    
+                case MessageType.Photo:
+                case MessageType.Document:
+                    AddReactionsToMessage(e.Message);
+                    break;
+                
+            }
+        }
+
+        async void ProcessCallbackQuery(object sender, CallbackQueryEventArgs e)
+        {
+            Console.WriteLine("Pressed button " + e.CallbackQuery.Data);
+            
+            Message message = e.CallbackQuery.Message;
+
+            try
+            {
+                if (!Byte.TryParse(e.CallbackQuery.Data, out byte buttonNumber))
+                {
+                    throw new Exception("Invalid callback data!");
+                }
+
+                dbManager.SaveReaction(e.CallbackQuery.From.Id, message.Chat.Id, message.MessageId, buttonNumber);
+                UpdateReactionsCount(message);
+                await AnswerCallbackQueryAsync(e.CallbackQuery.Id);
+            }
+            catch(MySqlException ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+            catch (Telegram.Bot.Exceptions.InvalidQueryIdException) { /*It's OK*/ }
+            catch (Telegram.Bot.Exceptions.InvalidParameterException ex) { Console.WriteLine(ex.Message); }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+        }
+
+
         private void SetReactionsKeyboard(Chat chat, string reactionsString)
         {
             int keyboard = dbManager.SaveKeyboard(InlineKeyboardFactory.ReactionsKeyboard(reactionsString));
@@ -150,104 +184,62 @@ namespace ReactionButtonsBot
 
         async Task AddReactionsToMessage(Message message)
         {
+            int keyboard;
             try
             {
-                int? keyboard = dbManager.GetKeyboardId(message.Chat);
-                if (keyboard == null)
+                object chatKeyboard = dbManager.GetKeyboard(message.Chat);
+                if(chatKeyboard is null || chatKeyboard is DBNull) /*Chat not in DB or without a keyboard*/
                 {
-                    keyboard = dbManager.SaveKeyboard(defaultReactionsKeyboard);
-                    dbManager.SaveChat(message.Chat, keyboard);
-                    return;
+                    throw new KeyboardNotSetException();
                 }
-                dbManager.SaveMessage(message, keyboard);
-                var markup = InlineKeyboardFactory.ReactionsKeyboard(dbManager.GetKeyboardButtons((int)keyboard));
-
-                await ReplaceMessage(message, markup);
+                else
+                {
+                    var replacementMessage = await ReplaceMessage(message);
+                    keyboard = (int)chatKeyboard;
+                    dbManager.SaveMessage(replacementMessage, keyboard);
+                    var markup = InlineKeyboardFactory.ReactionsKeyboard(dbManager.GetKeyboardButtons(keyboard));
+                    await EditMessageReplyMarkupAsync(replacementMessage.Chat.Id, replacementMessage.MessageId, markup);
+                }
+            }
+            catch(KeyboardNotSetException)
+            {
+                Console.WriteLine();
+                await SendTextMessageAsync(message.Chat, "Please set a keyboard for this chat.\n" +
+                    "To do so, send a plain text message formatted as follows:\n" +
+                    "/setkeyboard button1 button2 ... buttonN");
             }
             catch(Exception ex) { Console.WriteLine(ex.Message); }
         }
-
-        async Task AddReactionsToPhotoMessage(Message message)
-        {
-            var photo = GetPhotoFileId(message.Photo);
-            try
-            {
-                int? keyboard = dbManager.GetKeyboardId(message.Chat);
-                if(keyboard==null)
-                {
-                    keyboard = dbManager.SaveKeyboard(defaultReactionsKeyboard);
-                    dbManager.SaveChat(message.Chat, keyboard);
-                    return;
-                }
-                dbManager.SaveMessage(message, keyboard);
-                var markup = InlineKeyboardFactory.ReactionsKeyboard(dbManager.GetKeyboardButtons((int)keyboard));
-
-                var replacementMessage = await SendPhotoAsync(message.Chat.Id, photo, message.Caption);
-                await EditMessageReplyMarkupAsync(replacementMessage.Chat.Id, replacementMessage.MessageId, markup);
-                await DeleteMessageAsync(message.Chat.Id, message.MessageId);
-            }
-            catch (Telegram.Bot.Exceptions.ApiRequestException ex)
-            {
-                Console.WriteLine(ex.Message);
-                if (ex.Message.Equals("Bad Request: message can't be deleted"))
-                {
-                    //ask to grant admin rights?
-                }
-                Console.WriteLine(message);
-            }
-        }
-
-        async void ProcessCallbackQuery(object sender, CallbackQueryEventArgs e)
-        {
-            Console.WriteLine("Pressed button " + e.CallbackQuery.Data);
-
-            
-            Message message = e.CallbackQuery.Message;
-
-            try
-            {
-                if (!Byte.TryParse(e.CallbackQuery.Data, out byte buttonNumber))
-                {
-                    throw new Exception("Invalid callback data!");
-                }
-
-                int? dbMessageId = dbManager.GetMessageId(message);
-                if (dbMessageId == null) throw new Exception("message is not in DB");
-                
-                int? keyboard = dbManager.GetKeyboardId(message);
-                if (keyboard == null) throw new Exception("Inline keyboard not found in DB");
-
-                int? button = dbManager.GetButtonId((int)keyboard, buttonNumber);
-                if (button == null) { throw new Exception("Invalid callback data!"); }
-
-                dbManager.SaveReaction(e.CallbackQuery.From.Id, (int)dbMessageId, (int)button);
-            }
-            catch(MySqlException ex)
-            {
-                Console.WriteLine(ex.Message);
-                await AnswerCallbackQueryAsync(e.CallbackQuery.Id, "Sorry, there appears to be some bug. Try again.", true);
-            }
-            catch(Exception ex)
-            {
-                Console.WriteLine(ex.Message);
-            }
-
-            try { await AnswerCallbackQueryAsync(e.CallbackQuery.Id); }
-            catch(Telegram.Bot.Exceptions.InvalidQueryIdException) { /*It's OK*/ }
-        }
         
+        void UpdateReactionsCount(Message message)
+        {
+            var reactionsCount = dbManager.GetReactionsCount(message);
+
+            var markup = InlineKeyboardFactory.ReactionsKeyboard(dbManager.GetKeyboardButtons(dbManager.GetKeyboard(message)));
+            markup = InlineKeyboardFactory.SetReactionsCount(markup, reactionsCount);
+            EditMessageReplyMarkupAsync(message.Chat, message.MessageId, markup);
+        }
+
+        #region auxiliary methods
+
         string GetPhotoFileId(PhotoSize[] photoSizes)
         {
             //TODO actually select the largest file (and closest to original)
             return photoSizes[0].FileId;
         }
 
-        public void Test(string s)
-        {
-            switch (s)
-            {
-                
-            }
-        }
+        #endregion
+    }
+
+
+    [Serializable]
+    public class KeyboardNotSetException : Exception
+    {
+        public KeyboardNotSetException() { }
+        public KeyboardNotSetException(string message) : base(message) { }
+        public KeyboardNotSetException(string message, Exception inner) : base(message, inner) { }
+        protected KeyboardNotSetException(
+          System.Runtime.Serialization.SerializationInfo info,
+          System.Runtime.Serialization.StreamingContext context) : base(info, context) { }
     }
 }
